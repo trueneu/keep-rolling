@@ -1,45 +1,107 @@
-(ns keep-rolling-clj.core
-  (:require [keep-rolling-clj.protocols :refer :all]
-            keep-rolling-clj.utils))
+(ns keep-rolling-clj.core)
 
-(def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
+(def default-loop-delay 1)
+(def default-loop-retries 5)
+(def debug 1)
 
-(defn load-plugins []
-  (let [all-files (file-seq (clojure.java.io/file plugins-path))
-        without-dirs (remove #(.isDirectory %) all-files)
-        only-clj (filter #(.endsWith (.getName %) ".clj") without-dirs)]
-    (doseq [plugin only-clj]
-      (load-file (.getPath plugin)))))
+(defn printlnd [level & more]
+  (when (>= debug level)
+    (apply println more)))
 
-(defonce _ (load-plugins))  ; hackity hacks
+(def step-data1
+  {:type            :step
+   :name            :test-step1
+   :handler         (fn [params]
+                      (println "I am step 1: " (:message params))
+                      {:err nil :err-msg nil})
+   :required-params [:message]
+   :on-failure      :bail})
 
-(defn make-plugins-map []
-  (let [all-plugins (mapcat ns-publics (filter #(= (:kr-type (meta %)) :ns) (all-ns)))
-        plugins-by-name (apply hash-map (flatten all-plugins))
-        plugins-by-type (reduce (fn [acc [p-symbol p-var]]
-                                  (let [key (-> p-var meta :kr-type)
-                                        value p-var]
-                                    (assoc acc key (conj (acc key) value)))) {} all-plugins)]
-    (list plugins-by-name plugins-by-type)))
+(def step-data2
+  {:type            :step
+   :name            :test-step2
+   :handler         (fn [params]
+                      (println "I am step 2: " (:message params))
+                      {:err 1 :err-msg "fucking shit"})
+   :required-params [:message]
+   :on-failure      :bail})
 
-;(defn get-extenders [protocol]
-;  (let [all-imports (apply merge (map ns-imports (all-ns)))
-;        classes (filter (fn [cl] (extends? protocol cl))
-;                        (vals all-imports))]
-;    classes))
-;
-;(defn make-plugins-map []
-;  (let [protocols [IStep IRecipe]]
-;    (apply hash-map (interleave protocols (map get-extenders protocols)))))
+(def no-err-ret {:err nil :err-msg nil})
 
-;(defn main [args]
-;  (load-plugins)  ;; excuse me, but we'll deal with state a little bit here
-;  (let [plugins-map (make-plugins-map)]))
+(defn no-err-ret? [ret]
+  (= no-err-ret ret))
 
-(defn run-test-recipe []
-  (let [recipe-name "recipe1"
-        [plugins-map by-type] (make-plugins-map)
-        recipe-f (keep-rolling-clj.utils/plugin-by-name plugins-map recipe-name)]
-    (println plugins-map)
-    (println recipe-f)
-    (recipe-f {:plugins-map plugins-map})))
+(defn gen-entity-map [entities-coll]
+  (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
+
+(def entity-map (gen-entity-map [step-data1 step-data2]))
+
+(defn equal-count? [coll & colls]
+  (apply = (count coll) (map count colls)))
+
+(defn extract-params [step params]
+  (select-keys params (:required-params step)))
+
+(defn throw-exception-if [predicate ^String msg & params]
+  (if (apply predicate params)
+    (throw (Exception. msg))
+    (last params)))
+
+(defn loop-if [predicate delay retries retry-f f]
+  (loop [ret (f)
+         count 0]
+    (cond
+      (predicate ret) ret
+      (>= count retries) ret
+      :default (do (retry-f ret)
+                   (Thread/sleep (* 1000 delay))
+                   (recur (f) (inc count))))))
+
+(defn bail-or-skip [step step-ret]
+  (let [t (get step :on-failure :bail)]
+    (if (= step-ret no-err-ret)
+      step-ret
+      (cond
+        (= t :skip) (do (println (str "Step " (:name step) " failed. Skipping...")) no-err-ret)
+        (= t :bail) (do (println (str "Step " (:name step) " failed. Aborting...")) step-ret)))))
+
+(defn make-step-exec-f [step params]
+  (fn [] ((:handler step) params)))
+
+(defn nil-or-zero? [arg]
+  (or (nil? arg) (zero? arg)))
+
+(defn println-code-and-msg
+  ([ret]
+   (println (str "Error code " (:err ret) ": " (:err-msg ret))))
+  ([preamble ret]
+   (print preamble)
+   (println-code-and-msg ret)))
+
+(defn run-step [step params]
+  (->> params
+       (extract-params step)
+       (throw-exception-if (comp not equal-count?) (str "Invalid parameters passed to step " (:name step) ": " params) (:required-params step))
+       (make-step-exec-f step)
+       (loop-if #(nil-or-zero? (:err %))
+                (get step :delay default-loop-delay)
+                (get step :retries default-loop-retries)
+                #(println-code-and-msg %))
+       (bail-or-skip step)))
+
+(defn get-step [step-name]
+  (get-in entity-map [:step step-name]))
+
+(defn run-steps [steps params]
+  (reduce (fn [acc step]
+            (let [run-step-ret (run-step step params)]
+              (if (no-err-ret? run-step-ret)
+                (conj acc run-step-ret)
+                (do (println-code-and-msg "Last error: " run-step-ret)
+                    (reduced acc)))))
+          []
+          steps))
+
+;(run-step (get-step :test-step1) {:message "hello moto"})
+;(run-step (get-step :test-step2) {:message "hello moto"})
+;(run-steps (map get-step [:test-step1 :test-step2]) {:message "huilo"})

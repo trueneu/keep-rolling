@@ -1,34 +1,14 @@
-(ns keep-rolling-clj.utils
-  (:require [keep-rolling-clj.protocols])
-  (:import (clojure.lang Reflector PersistentVector)))
+(ns keep-rolling-clj.utils)
 
-(def special-fields [:err :err-msg])
-(def call-field :call-chain)
+(def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
 
-(defn plugin-by-name [plugins-map plugin-name]
-  (plugins-map (symbol plugin-name)))
+(defn load-plugins []
+  (let [all-files (file-seq (clojure.java.io/file plugins-path))
+        without-dirs (remove #(.isDirectory %) all-files)
+        only-clj (filter #(.endsWith (.getName %) ".clj") without-dirs)]
+    (doseq [plugin only-clj]
+      (load-file (.getPath plugin)))))
 
-(defn call-wrapper [f state]
-  (let [retval (f state)
-        special-retval (select-keys retval special-fields)
-        special-defaulted-retval (merge (apply hash-map (interleave special-fields (repeat nil))) special-retval)
-        dissocced-retval (apply dissoc retval special-fields)
-        f-name (str f)
-        state-with-retval (reduce (fn [acc [k v]] (assoc acc k (conj (acc k) v))) state special-defaulted-retval)
-        state-with-retval-and-call-chain (assoc state-with-retval call-field (conj (state-with-retval call-field) f-name))]
-    (merge state-with-retval-and-call-chain dissocced-retval)))
+(defonce _ (load-plugins))  ; hackity hacks
 
-
-
-;(defn plugins-by-names [plugins-map protocol plugin-names]
-;  (apply hash-map (interleave plugin-names (mapcat #(plugin-by-name plugins-map protocol %) plugin-names))))
-
-;(defn plugins-by-names [plugins-map protocol plugin-names]
-;  (map #(plugin-by-name plugins-map protocol %) plugin-names))
-;
-;(defn make-plugin-record
-;  ([plugin-class ^PersistentVector args]
-;   (Reflector/invokeConstructor (resolve (symbol (.getName plugin-class))) (to-array args)))
-;  ([plugin-class]
-;   (Reflector/invokeConstructor (resolve (symbol (.getName plugin-class))) (to-array []))))
 
