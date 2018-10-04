@@ -8,6 +8,9 @@
   (when (>= debug level)
     (apply println more)))
 
+(defn gen-entity-map [entities-coll]
+  (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
+
 (def step-data1
   {:type            :step
    :name            :test-step1
@@ -26,15 +29,31 @@
    :required-params [:message]
    :on-failure      :bail})
 
+(def recipe-data1
+  {:type :recipe
+   :name :test-recipe1
+   :steps [:test-step1 :test-step2]
+   :handler (fn [params]
+              (assoc params :recipe-msg "HELLO SUKA"))})
+
+(def classifier-data1
+  {:type :classifier
+   :name :test-classifier1
+   :required-params [:cluster]
+   :handler (fn []
+              (cond
+                (= :cluster "kafka") ["huyafka"]
+                :default ["wowowowa"]))})
+
+(def entity-map (gen-entity-map [step-data1 step-data2 recipe-data1 classifier-data1]))
+
 (def no-err-ret {:err nil :err-msg nil})
 
+(defn nil-or-zero? [arg]
+  (or (nil? arg) (zero? arg)))
+
 (defn no-err-ret? [ret]
-  (= no-err-ret ret))
-
-(defn gen-entity-map [entities-coll]
-  (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
-
-(def entity-map (gen-entity-map [step-data1 step-data2]))
+  (nil-or-zero? (:err ret)))
 
 (defn equal-count? [coll & colls]
   (apply = (count coll) (map count colls)))
@@ -51,7 +70,7 @@
   (loop [ret (f)
          count 0]
     (cond
-      (predicate ret) ret
+      (not (predicate ret)) ret
       (>= count retries) ret
       :default (do (retry-f ret)
                    (Thread/sleep (* 1000 delay))
@@ -59,7 +78,7 @@
 
 (defn bail-or-skip [step step-ret]
   (let [t (get step :on-failure :bail)]
-    (if (= step-ret no-err-ret)
+    (if (no-err-ret? step-ret)
       step-ret
       (cond
         (= t :skip) (do (println (str "Step " (:name step) " failed. Skipping...")) no-err-ret)
@@ -67,9 +86,6 @@
 
 (defn make-step-exec-f [step params]
   (fn [] ((:handler step) params)))
-
-(defn nil-or-zero? [arg]
-  (or (nil? arg) (zero? arg)))
 
 (defn println-code-and-msg
   ([ret]
@@ -83,7 +99,7 @@
        (extract-params step)
        (throw-exception-if (comp not equal-count?) (str "Invalid parameters passed to step " (:name step) ": " params) (:required-params step))
        (make-step-exec-f step)
-       (loop-if #(nil-or-zero? (:err %))
+       (loop-if (comp not no-err-ret?)
                 (get step :delay default-loop-delay)
                 (get step :retries default-loop-retries)
                 #(println-code-and-msg %))
