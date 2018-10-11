@@ -1,4 +1,5 @@
 (ns keep-rolling-clj.core
+  (:require [keep-rolling-clj.utils :as u])
   (:require [clojure.test :refer [is]])
   (:require [clojure.pprint :refer [pprint]]))
 (def default-loop-delay 1)
@@ -7,63 +8,13 @@
 
 (defn printlnd [level & more]
   (when (>= debug level)
-    (apply println more)))
+    (apply pprint more)))
 
 (defn gen-entity-map [entities-coll]
   (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
 
-(def step-data1
-  {:type            :step
-   :name            :test-step1
-   :action-type     :handler
-   :handler         (fn [params]
-                      (println "I am step 1: " (:message params))
-                      {:err nil :err-msg nil})
-   :required-params [:message]
-   :on-failure      :bail})
 
-(def step-data2
-  {:type            :step
-   :name            :test-step2
-   :action-type     :start
-   :on-failure      :bail})
-
-(def step-data3
-  {:type            :step
-   :name            :test-step3
-   :action-type     :stop
-   :on-failure      :skip})
-
-(def recipe-data1
-  {:type :recipe
-   :name :test-recipe1
-   :steps [:test-step1 :test-step2 :test-step3]
-   :handler (fn [params]
-              {:recipe-msg "HELLO SUKA"})})
-
-(def classifier-data1
-  {:type :classifier
-   :name :test-classifier1
-   :required-params [:cluster]
-   :handler (fn [params]
-              (cond
-                (= (:cluster params) "kafka") ["huyafka"]))})
-
-(def service-data1
-  {:type :service
-   :name :test-service1
-   :required-params [:cluster]
-   :matcher (fn [params]
-              (= (:cluster params) "kafka"))
-   :start (fn [params]
-            (println "Service started")
-            {:err nil :err-msg nil})
-   :stop (fn [params]
-            (println "Service stopped")
-            {:err 1 :err-msg "couldn't stop service"})})
-
-
-(def entity-map (gen-entity-map [step-data1 step-data2 step-data3 recipe-data1 classifier-data1 service-data1]))
+(def entity-map (gen-entity-map (u/get-all-plugins)))
 
 (def no-err-ret {:err nil :err-msg nil})
 

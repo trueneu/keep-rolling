@@ -9,6 +9,13 @@
     (doseq [plugin only-clj]
       (load-file (.getPath plugin)))))
 
-(defonce _ (load-plugins))  ; hackity hacks
+(defonce _ (load-plugins)) ; hackity hacks
+(load-plugins)
 
+(defn get-all-plugins []
+  (->> (all-ns)
+   (mapcat ns-publics)
+   (map second)
+   (filter #(-> % meta :kr))
+   (map deref)))
 
