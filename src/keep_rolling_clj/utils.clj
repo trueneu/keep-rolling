@@ -4,7 +4,7 @@
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
 
 (defn load-plugins []
-  (let [all-files (file-seq (clojure.java.io/file plugins-path))
+  (let [all-files (file-seq (File. ^String plugins-path))
         without-dirs (remove #(.isDirectory ^File %) all-files)
         only-clj (filter #(.endsWith (.getName %) ".clj") without-dirs)]
     (doseq [plugin only-clj]
