@@ -10,7 +10,6 @@
     (doseq [plugin only-clj]
       (load-file (.getPath plugin)))))
 
-(defonce _ (load-plugins)) ; hackity hacks
 (load-plugins)
 
 (defn get-all-plugins []
