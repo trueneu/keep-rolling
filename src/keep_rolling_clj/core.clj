@@ -194,7 +194,6 @@
         steps (map get-step (:steps recipe))
         params-recipe-addition ((:handler recipe) params)
         params-recipe-enriched (merge params params-recipe-addition)
-        x (println "baoeut")
         hosts (run-classifier classifier params-recipe-enriched)
         params-with-hosts (assoc params-recipe-enriched :hosts hosts)
         matching-services (get-matching-services (services-vec) params-with-hosts)
