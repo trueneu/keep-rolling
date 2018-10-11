@@ -114,7 +114,10 @@
        (classify classifier)))
 
 (defn services-vec []
-  (mapv get-service (keys (:service entity-map))))
+  (->> entity-map
+       (:service)
+       (keys)
+       (mapv get-service)))
 
 (defn get-matching-services [services params]
   (filter (fn [service] ((:matcher service) params)) services))
