@@ -1,18 +1,23 @@
 (ns keep-rolling-clj.core
   (:require [keep-rolling-clj.utils :as u])
   (:require [clojure.test :refer [is]])
-  (:require [clojure.pprint :refer [pprint]]))
-(def default-loop-delay 1)
-(def default-loop-retries 2)
+  (:require [clojure.pprint :refer [pprint]])
+  (:import [Double]))
 (def debug 1)
 
-(defn printlnd [level & more]
+(def default-step-params
+  {:on-failure         :bail
+   :delay              5
+   :retries            Double/POSITIVE_INFINITY
+   :parallel-execution false})
+
+(defn print-debug [level & more]
   (when (>= debug level)
-    (apply pprint more)))
+    (doseq [object more]
+      (pprint object))))
 
 (defn gen-entity-map [entities-coll]
   (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
-
 
 (def entity-map (gen-entity-map (u/get-all-plugins)))
 
@@ -78,8 +83,8 @@
        (extract-and-check-params step)
        (make-step-exec-f step)
        (loop-if (comp not no-err-ret?)
-                (get step :delay default-loop-delay)
-                (get step :retries default-loop-retries)
+                (:delay step)
+                (:retries step)
                 #(println-code-and-msg %))
        (bail-or-skip step)))
 
@@ -99,14 +104,31 @@
   (get-entity :recipe recipe-name))
 
 (defn run-steps [steps params]
-  (reduce (fn [acc step]
-            (let [run-step-ret (run-step step params)]
-              (if (no-err-ret? run-step-ret)
-                (conj acc run-step-ret)
-                (do (println-code-and-msg "Last error: " run-step-ret)
-                    (-> acc (conj run-step-ret) reduced)))))
-          []
-          steps))
+  (loop [hosts (:hosts params)]
+    (let [[host & rest-hosts] hosts]
+      (if (empty? hosts)
+        no-err-ret
+        (if (no-err-ret?     (loop [curr-steps steps]
+                               (let [[step & rest-steps] curr-steps
+                                     step-ret (run-step step (assoc params :host host))]
+                                 ;(print-debug 1 "Current steps:" curr-steps)
+                                 (if (no-err-ret? step-ret)
+                                   (if (empty? rest-steps)
+                                     no-err-ret
+                                     (recur rest-steps))
+                                   (println-code-and-msg "Last error: " step-ret)))))
+          (recur (rest hosts))
+          {:err :err})))))
+
+
+  ;(reduce (fn [acc step]
+  ;          (let [run-step-ret (run-step step params)]
+  ;            (if (no-err-ret? run-step-ret)
+  ;              (conj acc run-step-ret)
+  ;              (do (println-code-and-msg "Last error: " run-step-ret)
+  ;                  (-> acc (conj run-step-ret) reduced)))))
+  ;        []
+  ;        steps))
 
 (defn run-classifier [classifier params]
   (->> params
@@ -145,23 +167,23 @@
   (let [{classifier-name :classifier recipe-name :recipe} params
         classifier (get-classifier classifier-name)
         recipe (get-recipe recipe-name)
-        steps (map get-step (:steps recipe))
+        steps (->> (:steps recipe) (map get-step) (map #(merge default-step-params %)))
         params-recipe-addition ((:handler recipe) params)
         params-recipe-enriched (merge params params-recipe-addition)
         hosts (run-classifier classifier params-recipe-enriched)
         params-with-hosts (assoc params-recipe-enriched :hosts hosts)
         matching-services (get-matching-services (services-vec) params-with-hosts)
         expanded-steps (expand-service-steps steps matching-services)
-        expanded-params (assoc params-recipe-enriched :steps expanded-steps)]
+        expanded-params (assoc params-with-hosts :steps expanded-steps)]
     expanded-params))
 
 (defn run [params]
   (let [expanded-params (expand-params params)]
-    (pprint expanded-params)
+    (print-debug 1 expanded-params)
     (run-steps (:steps expanded-params) expanded-params)))
 
-;(run {:classifier :test-classifier1
-;      :cluster "kafka"
-;      :recipe :test-recipe1
-;      :message "hui"})
+(run {:classifier :test-classifier1
+      :cluster "kafka"
+      :recipe :test-recipe1
+      :message "hui"})
 
