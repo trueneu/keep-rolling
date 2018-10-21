@@ -19,3 +19,25 @@
    (filter #(-> % meta :kr))
    (map deref)))
 
+(defn deep-map
+  ([f coll]
+   (loop [c coll
+          res []]
+     (if (or (empty? c))
+       res
+       (let [[f-c & r-c] c]
+         (cond
+           (vector? f-c) (recur r-c (conj res (deep-map f f-c)))
+           :default (recur r-c (f res f-c))))))))
+
+(defn deep-map-scalar-helper [f]
+  (fn [coll x] (conj coll (f x))))
+
+(defn deep-map-coll-helper [f]
+  (fn [coll x] ((comp vec concat) coll (f x))))
+
+(defn deep-map-scalar [f coll]
+  (deep-map (deep-map-scalar-helper f) coll))
+
+(defn deep-map-coll [f coll]
+  (deep-map (deep-map-coll-helper f) coll))

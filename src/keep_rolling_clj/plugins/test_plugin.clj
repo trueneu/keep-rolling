@@ -5,7 +5,6 @@
    :name            :test-step1
    :action-type     :handler
    :handler         (fn [params]
-                      (println "I am step 1: host " (:host params))
                       {:err nil :err-msg nil})
    :required-params [:message :host]
    :on-failure      :bail
@@ -31,7 +30,7 @@
 (def ^:kr recipe-data1
   {:type    :recipe
    :name    :test-recipe1
-   :steps   [:test-step1 :test-step2 :test-step3]
+   :steps   [[:test-step1] [:test-step2 :test-step3]]
    :handler (fn [params]
               {:recipe-msg "HELLO SUKA"})})
 
@@ -41,7 +40,7 @@
    :required-params [:cluster]
    :handler         (fn [params]
                       (cond
-                        (= (:cluster params) "kafka") ["huyafka"]))})
+                        (= (:cluster params) "kafka") ["host1" "host2"]))})
 
 (def ^:kr service-data1
   {:type            :service
@@ -50,8 +49,21 @@
    :matcher         (fn [params]
                       (= (:cluster params) "kafka"))
    :start           (fn [params]
-                      (println "Service started")
+                      (println "Service1 started")
                       {:err nil :err-msg nil})
    :stop            (fn [params]
-                                 (println "Service stopped")
-                                 {:err 1 :err-msg "couldn't stop service"})})
+                      (println "Service1 stopped")
+                      {:err 0 :err-msg "couldn't stop service"})})
+
+(def ^:kr service-data2
+  {:type            :service
+   :name            :test-service2
+   :required-params [:cluster]
+   :matcher         (fn [params]
+                      (= (:cluster params) "kafka"))
+   :start           (fn [params]
+                      (println "Service2 started")
+                      {:err nil :err-msg nil})
+   :stop            (fn [params]
+                      (println "Service2 stopped")
+                      {:err 0 :err-msg "couldn't stop service"})})

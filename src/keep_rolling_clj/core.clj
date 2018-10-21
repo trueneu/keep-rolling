@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [is]])
   (:require [clojure.pprint :refer [pprint]])
   (:import [Double]))
-(def debug 1)
+(def debug 999)
 
 (def default-step-params
   {:on-failure         :bail
@@ -14,7 +14,9 @@
 (defn print-debug [level & more]
   (when (>= debug level)
     (doseq [object more]
-      (pprint object))))
+      (cond
+        (= String (type object)) (println object)
+        :default (pprint object)))))
 
 (defn gen-entity-map [entities-coll]
   (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
@@ -28,6 +30,9 @@
 
 (defn no-err-ret? [ret]
   (nil-or-zero? (:err ret)))
+
+(defn err-ret? [ret]
+  ((comp not no-err-ret?) (:err ret)))
 
 (defn equal-count? [coll & colls]
   (apply = (count coll) (map count colls)))
@@ -79,14 +84,15 @@
    (println-code-and-msg ret)))
 
 (defn run-step [step params]
-  (->> params
-       (extract-and-check-params step)
-       (make-step-exec-f step)
-       (loop-if (comp not no-err-ret?)
-                (:delay step)
-                (:retries step)
-                #(println-code-and-msg %))
-       (bail-or-skip step)))
+    (print-debug 1 (str "Running step " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)))
+    (->> params
+         (extract-and-check-params step)
+         (make-step-exec-f step)
+         (loop-if (comp not no-err-ret?)
+                  (:delay step)
+                  (:retries step)
+                  #(println-code-and-msg %))
+         (bail-or-skip step)))
 
 (defn get-entity [entity-type entity-name]
   (get-in entity-map [entity-type entity-name]))
@@ -103,32 +109,56 @@
 (defn get-recipe [recipe-name]
   (get-entity :recipe recipe-name))
 
-(defn run-steps [steps params]
-  (loop [hosts (:hosts params)]
-    (let [[host & rest-hosts] hosts]
-      (if (empty? hosts)
-        no-err-ret
-        (if (no-err-ret?     (loop [curr-steps steps]
-                               (let [[step & rest-steps] curr-steps
-                                     step-ret (run-step step (assoc params :host host))]
-                                 ;(print-debug 1 "Current steps:" curr-steps)
-                                 (if (no-err-ret? step-ret)
-                                   (if (empty? rest-steps)
-                                     no-err-ret
-                                     (recur rest-steps))
-                                   (println-code-and-msg "Last error: " step-ret)))))
-          (recur (rest hosts))
-          {:err :err})))))
+  ;(loop [hosts (:hosts params)]
+  ;  (let [[host & rest-hosts] hosts]
+  ;    (if (empty? hosts)
+  ;      no-err-ret
+  ;      (if (no-err-ret?     (loop [curr-steps steps]
+  ;                             (let [[step & rest-steps] curr-steps
+  ;                                   step-ret (run-step step (assoc params :host host))]
+  ;                               ;(print-debug 1 "Current steps:" curr-steps)
+  ;                               (if (no-err-ret? step-ret)
+  ;                                 (if (empty? rest-steps)
+  ;                                   no-err-ret
+  ;                                   (recur rest-steps))
+  ;                                 (println-code-and-msg "Last error: " step-ret)))))
+  ;        (recur (rest hosts))
+  ;        {:err :err})))))
 
 
-  ;(reduce (fn [acc step]
-  ;          (let [run-step-ret (run-step step params)]
-  ;            (if (no-err-ret? run-step-ret)
-  ;              (conj acc run-step-ret)
-  ;              (do (println-code-and-msg "Last error: " run-step-ret)
-  ;                  (-> acc (conj run-step-ret) reduced)))))
-  ;        []
-  ;        steps))
+(defn run-step-group-on-host [steps host params]
+  (let [params-with-host (assoc params :host host)]
+    (reduce (fn [_ step]
+              (let [run-step-ret (run-step step params-with-host)]
+                (when-not (no-err-ret? run-step-ret)
+                  (println-code-and-msg "Last error: " run-step-ret)
+                  (reduced run-step-ret))))
+      no-err-ret
+      steps)))
+
+(defn run-step-group-on-hosts [steps params]
+  (reduce (fn [_ host]
+            (let [run-step-group-ret (run-step-group-on-host steps host params)]
+              (when-not (no-err-ret? run-step-group-ret)
+                (reduced run-step-group-ret))))
+    no-err-ret
+    (:hosts params)))
+
+;; above two look very similar
+
+(defn run-step-group [steps params]
+  (loop [s steps
+         hosts (:hosts params)
+         prev-ret no-err-ret]
+    (if (or (empty? hosts) (err-ret? prev-ret))
+      prev-ret
+      (let [[f-s & r-s] s]
+        ;(print-debug 3 "steps: " steps)
+        (cond
+          (vector? f-s) (recur r-s hosts (run-step-group-on-hosts f-s params))
+          :default (run-step-group-on-hosts s params))))))
+
+
 
 (defn run-classifier [classifier params]
   (->> params
@@ -148,13 +178,15 @@
   (let [action-type (:action-type step)]
     (-> step
         (assoc :action-type :handler)
-        (assoc :handler (action-type service)))))
+        (assoc :handler (action-type service))
+        (assoc :service (:name service)))))
 
 (defn expand-service-step [step services]
   (let [action-type (:action-type step)]
     (if (= action-type :handler)
       [step]
       (map (partial service-to-step step) services))))
+
 
 (defn expand-service-steps [steps services]
   (reduce
@@ -163,24 +195,31 @@
     []
     steps))
 
+;(nested-fn get-step [[:test-step1 :test-step2] :test-step3 [:test-step1]])
+;(deep-map
+;  (fn [coll x] (conj coll (get-step x)))
+;  [[:test-step1 :test-step2] :test-step3 [:test-step1]])
+
 (defn expand-params [params]
   (let [{classifier-name :classifier recipe-name :recipe} params
         classifier (get-classifier classifier-name)
         recipe (get-recipe recipe-name)
-        steps (->> (:steps recipe) (map get-step) (map #(merge default-step-params %)))
         params-recipe-addition ((:handler recipe) params)
         params-recipe-enriched (merge params params-recipe-addition)
         hosts (run-classifier classifier params-recipe-enriched)
         params-with-hosts (assoc params-recipe-enriched :hosts hosts)
         matching-services (get-matching-services (services-vec) params-with-hosts)
-        expanded-steps (expand-service-steps steps matching-services)
+
+        steps (->> (:steps recipe) (u/deep-map-scalar get-step) (u/deep-map-scalar #(merge default-step-params %)))
+        expanded-steps (u/deep-map-coll #(expand-service-step % matching-services) steps)
         expanded-params (assoc params-with-hosts :steps expanded-steps)]
+
     expanded-params))
 
 (defn run [params]
   (let [expanded-params (expand-params params)]
     (print-debug 1 expanded-params)
-    (run-steps (:steps expanded-params) expanded-params)))
+    (run-step-group (:steps expanded-params) expanded-params)))  ; fixme
 
 (run {:classifier :test-classifier1
       :cluster "kafka"
