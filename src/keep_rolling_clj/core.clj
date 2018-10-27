@@ -40,10 +40,10 @@
 (defn extract-params [entity params]
   (select-keys params (:required-params entity)))
 
-(defn throw-exception-if [predicate ^String msg & params]
-  (if (apply predicate params)
+(defn throw-exception-if [predicate ^String msg & coll]
+  (if (apply predicate coll)
     (throw (Exception. msg))
-    (last params)))
+    (last coll)))
 
 (defn extract-and-check-params [entity params]
   (let [extracted-params (extract-params entity params)
@@ -144,7 +144,7 @@
     no-err-ret
     (:hosts params)))
 
-;; above two look very similar
+;; todo above two look very similar
 
 (defn run-step-group [steps params]
   (loop [s steps
@@ -153,12 +153,9 @@
     (if (or (empty? hosts) (err-ret? prev-ret))
       prev-ret
       (let [[f-s & r-s] s]
-        ;(print-debug 3 "steps: " steps)
         (cond
           (vector? f-s) (recur r-s hosts (run-step-group-on-hosts f-s params))
           :default (run-step-group-on-hosts s params))))))
-
-
 
 (defn run-classifier [classifier params]
   (->> params
@@ -200,6 +197,12 @@
 ;  (fn [coll x] (conj coll (get-step x)))
 ;  [[:test-step1 :test-step2] :test-step3 [:test-step1]])
 
+(defn check-steps-nesting [steps]
+  (throw-exception-if
+    (comp not u/deep-same-type)
+    (str "Steps collection must not have dangling steps: " steps)
+    steps))
+
 (defn expand-params [params]
   (let [{classifier-name :classifier recipe-name :recipe} params
         classifier (get-classifier classifier-name)
@@ -210,7 +213,7 @@
         params-with-hosts (assoc params-recipe-enriched :hosts hosts)
         matching-services (get-matching-services (services-vec) params-with-hosts)
 
-        steps (->> (:steps recipe) (u/deep-map-scalar get-step) (u/deep-map-scalar #(merge default-step-params %)))
+        steps (->> (:steps recipe) (check-steps-nesting) (u/deep-map-scalar get-step) (u/deep-map-scalar #(merge default-step-params %)))
         expanded-steps (u/deep-map-coll #(expand-service-step % matching-services) steps)
         expanded-params (assoc params-with-hosts :steps expanded-steps)]
 
@@ -219,7 +222,7 @@
 (defn run [params]
   (let [expanded-params (expand-params params)]
     (print-debug 1 expanded-params)
-    (run-step-group (:steps expanded-params) expanded-params)))  ; fixme
+    (run-step-group (:steps expanded-params) expanded-params)))
 
 (run {:classifier :test-classifier1
       :cluster "kafka"

@@ -41,3 +41,17 @@
 
 (defn deep-map-coll [f coll]
   (deep-map (deep-map-coll-helper f) coll))
+
+(defn same-type? [coll]
+  (apply = (map type coll)))
+
+(defn deep-same-type [coll]
+  (let [same-type (same-type? coll)]
+    (reduce
+      (fn [acc val]
+        (if (vector? val)
+          (and acc (deep-same-type val))
+          acc))
+      same-type
+      coll)))
+
