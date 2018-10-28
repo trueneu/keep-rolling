@@ -3,6 +3,7 @@
 
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
 
+
 (defn load-plugins []
   (let [all-files (file-seq (File. ^String plugins-path))
         without-dirs (remove #(.isDirectory ^File %) all-files)
@@ -10,7 +11,9 @@
     (doseq [plugin only-clj]
       (load-file (.getPath plugin)))))
 
+
 (load-plugins)
+
 
 (defn get-all-plugins []
   (->> (all-ns)
@@ -18,6 +21,7 @@
    (map second)
    (filter #(-> % meta :kr))
    (map deref)))
+
 
 (defn deep-map
   ([f coll]
@@ -30,20 +34,26 @@
            (vector? f-c) (recur r-c (conj res (deep-map f f-c)))
            :default (recur r-c (f res f-c))))))))
 
+
 (defn deep-map-scalar-helper [f]
   (fn [coll x] (conj coll (f x))))
+
 
 (defn deep-map-coll-helper [f]
   (fn [coll x] ((comp vec concat) coll (f x))))
 
+
 (defn deep-map-scalar [f coll]
   (deep-map (deep-map-scalar-helper f) coll))
+
 
 (defn deep-map-coll [f coll]
   (deep-map (deep-map-coll-helper f) coll))
 
+
 (defn same-type? [coll]
   (apply = (map type coll)))
+
 
 (defn deep-same-type [coll]
   (let [same-type (same-type? coll)]
@@ -55,3 +65,18 @@
       same-type
       coll)))
 
+
+(defn nil-or-zero? [arg]
+  (or (nil? arg) (zero? arg)))
+
+
+(defn no-err-ret? [ret]
+  (nil-or-zero? (:err ret)))
+
+
+(defn err-ret? [ret]
+  ((comp not no-err-ret?) (:err ret)))
+
+
+(defn equal-count? [coll & colls]
+  (apply = (count coll) (map count colls)))
