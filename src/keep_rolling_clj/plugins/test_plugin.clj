@@ -14,7 +14,7 @@
 (def ^:kr step-data2
   {:type        :step
    :name        :test-step2
-   :action-type :start
+   :action-type :start-prepare
    :on-failure  :bail
    :retries     2
    :delay       1})

@@ -114,22 +114,6 @@
 (defn get-recipe [recipe-name]
   (get-entity :recipe recipe-name))
 
-  ;(loop [hosts (:hosts params)]
-  ;  (let [[host & rest-hosts] hosts]
-  ;    (if (empty? hosts)
-  ;      no-err-ret
-  ;      (if (no-err-ret?     (loop [curr-steps steps]
-  ;                             (let [[step & rest-steps] curr-steps
-  ;                                   step-ret (run-step step (assoc params :host host))]
-  ;                               ;(print-debug 1 "Current steps:" curr-steps)
-  ;                               (if (no-err-ret? step-ret)
-  ;                                 (if (empty? rest-steps)
-  ;                                   no-err-ret
-  ;                                   (recur rest-steps))
-  ;                                 (println-code-and-msg "Last error: " step-ret)))))
-  ;        (recur (rest hosts))
-  ;        {:err :err})))))
-
 
 (defn run-step-group-on-host [steps host params]
   (let [params-with-host (assoc params :host host)]
@@ -186,7 +170,7 @@
   (let [action-type (:action-type step)]
     (-> step
         (assoc :action-type :handler)
-        (assoc :handler (action-type service))
+        (assoc :handler (get service action-type (fn [& _] no-err-ret)))
         (assoc :service (:name service)))))
 
 
@@ -196,19 +180,6 @@
       [step]
       (map (partial service-to-step step) services))))
 
-
-
-(defn expand-service-steps [steps services]
-  (reduce
-    (fn [acc val]
-      (concat acc (expand-service-step val services)))
-    []
-    steps))
-
-;(nested-fn get-step [[:test-step1 :test-step2] :test-step3 [:test-step1]])
-;(deep-map
-;  (fn [coll x] (conj coll (get-step x)))
-;  [[:test-step1 :test-step2] :test-step3 [:test-step1]])
 
 (defn check-steps-nesting [steps]
   (throw-exception-if
@@ -244,4 +215,3 @@
       :cluster "kafka"
       :recipe :test-recipe1
       :message "hui"})
-
