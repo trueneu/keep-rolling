@@ -12,6 +12,9 @@
    :retries            Double/POSITIVE_INFINITY
    :parallel-execution false})
 
+(def default-global-params
+  {:host-filter ".*"})
+
 
 (defn gen-entity-map [entities-coll]
   (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
@@ -190,17 +193,27 @@
 
 (defn expand-params [params]
   (let [{classifier-name :classifier recipe-name :recipe} params
-        classifier (get-classifier classifier-name)
-        recipe (get-recipe recipe-name)
-        params-recipe-addition ((:handler recipe) params)
-        params-recipe-enriched (merge params params-recipe-addition)
-        hosts (run-classifier classifier params-recipe-enriched)
-        params-with-hosts (assoc params-recipe-enriched :hosts hosts)
-        matching-services (get-matching-services (services-vec) params-with-hosts)
+        params-with-defaults   (merge default-global-params params)
+        host-filter            (:host-filter params-with-defaults)
+        classifier             (get-classifier classifier-name)
+        recipe                 (get-recipe recipe-name)
+        params-recipe-addition ((:handler recipe) params-with-defaults)
+        params-recipe-enriched (merge params-with-defaults params-recipe-addition)
+        hosts                  (run-classifier classifier params-recipe-enriched)
+        filtered-hosts         (filter #(re-find (re-pattern host-filter) %) hosts)
+        params-with-hosts      (-> params-recipe-enriched
+                                   (assoc :hosts filtered-hosts)
+                                   (assoc :all-hosts hosts))
 
-        steps (->> (:steps recipe) (check-steps-nesting) (u/deep-map-scalar get-step) (u/deep-map-scalar #(merge default-step-params %)))
-        expanded-steps (u/deep-map-coll #(expand-service-step % matching-services) steps)
-        expanded-params (assoc params-with-hosts :steps expanded-steps)]
+        matching-services      (get-matching-services (services-vec) params-with-hosts)
+
+        steps                  (->> (:steps recipe)
+                                    (check-steps-nesting)
+                                    (u/deep-map-scalar get-step)
+                                    (u/deep-map-scalar #(merge default-step-params %)))
+
+        expanded-steps         (u/deep-map-coll #(expand-service-step % matching-services) steps)
+        expanded-params        (assoc params-with-hosts :steps expanded-steps)]
 
     expanded-params))
 
