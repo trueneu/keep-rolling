@@ -1,5 +1,38 @@
 (ns keep-rolling-clj.utils
+  (:require [clojure.pprint :as pprint])
   (:import (java.io File)))
+
+
+(def debug 999)
+
+
+(def stdout-lock (Object.))
+
+
+(defn locked [lock fn & more]
+  (locking lock
+    (apply fn more)))
+
+
+(defn locked-print [& more]
+  (apply locked stdout-lock print more))
+
+
+(defn locked-println [& more]
+  (apply locked stdout-lock println more))
+
+
+(defn locked-print-debug [level & more]
+  (when (>= debug level)
+    (locked
+      stdout-lock
+      #(doseq [object %]
+        (cond
+          (= String (type object)) (println object)
+          :default (pprint/pprint object)))
+      more)))
+
+
 
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
 

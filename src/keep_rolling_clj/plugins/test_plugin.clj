@@ -1,15 +1,17 @@
 (ns keep-rolling-clj.plugins.test-plugin)
 
 (def ^:kr step-data1
-  {:type            :step
-   :name            :test-step1
-   :action-type     :handler
-   :handler         (fn [params]
-                      {:err nil :err-msg nil})
-   :required-params [:message :host]
-   :on-failure      :bail
-   :retries         2
-   :delay           1})
+  {:type               :step
+   :name               :test-step1
+   :action-type        :handler
+   :handler            (fn [params]
+                         (Thread/sleep 1000)
+                         {:err nil :err-msg nil})
+   :required-params    [:message :host]
+   :on-failure         :bail
+   :retries            2
+   :delay              1})
+   ;:parallel-execution true})
 
 (def ^:kr step-data2
   {:type        :step
