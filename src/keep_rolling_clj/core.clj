@@ -104,7 +104,7 @@
                       (ref-set immediate-return true))
                     step-ret)
 
-        (:skip) (do (utils/safe-println (str "Skip: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)))
+        (:skip) (do (utils/safe-println-code-and-msg (str "Skip: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)) step-ret)
                     no-err-ret)))))
 
 
@@ -193,7 +193,8 @@
     (-> step
         (assoc :action-type :handler)
         (assoc :handler (get service action-type (fn [& _] no-err-ret)))
-        (assoc :service (:name service)))))
+        (assoc :service (:name service))
+        (assoc :required-params (:required-params service)))))
 
 
 (defn expand-service-step [step services]
@@ -261,6 +262,7 @@
 
 
 (defn run [params]
+  (dosync (ref-set immediate-return false))
   (let [expanded-params (expand-params params)
         _ (utils/safe-print-debug 1 expanded-params)
         ret (run-steps (:steps expanded-params) expanded-params)]

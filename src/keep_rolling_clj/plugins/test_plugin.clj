@@ -1,4 +1,5 @@
-(ns keep-rolling-clj.plugins.test-plugin)
+(ns keep-rolling-clj.plugins.test-plugin
+  (:require [keep-rolling-clj.utils :as utils]))
 
 (def ^:kr step-data1
   {:type               :step
@@ -16,7 +17,7 @@
 (def ^:kr step-data2
   {:type        :step
    :name        :test-step2
-   :action-type :start-prepare
+   :action-type :start
    :on-failure  :bail
    :retries     2
    :delay       1})
@@ -47,14 +48,16 @@
 (def ^:kr service-data1
   {:type            :service
    :name            :test-service1
-   :required-params [:cluster]
+   :required-params [:cluster :host]
    :matcher         (fn [params]
                       (= (:cluster params) "kafka"))
    :start           (fn [params]
-                      (println "Service1 started")
-                      {:err nil :err-msg nil})
+                      (utils/safe-println "Service1 started")
+                      (if (= (:host params) "host1")
+                        {:err nil :err-msg nil}
+                        {:err 100 :err-msg "because fuck off"}))
    :stop            (fn [params]
-                      (println "Service1 stopped")
+                      (utils/safe-println "Service1 stopped")
                       {:err 0 :err-msg "couldn't stop service"})})
 
 (def ^:kr service-data2
@@ -64,8 +67,8 @@
    :matcher         (fn [params]
                       (= (:cluster params) "kafka"))
    :start           (fn [params]
-                      (println "Service2 started")
+                      (utils/safe-println "Service2 started")
                       {:err nil :err-msg nil})
    :stop            (fn [params]
-                      (println "Service2 stopped")
+                      (utils/safe-println "Service2 stopped")
                       {:err 0 :err-msg "couldn't stop service"})})
