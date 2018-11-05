@@ -56,15 +56,6 @@
                    (recur (f) (inc count))))))
 
 
-(defn bail-or-skip [step step-ret]
-  (let [t (get step :on-failure :bail)]
-    (if (utils/no-err-ret? step-ret)
-      step-ret
-      (cond
-        (= t :skip) (do (utils/safe-println (str "Step " (:name step) " failed. Skipping...")) no-err-ret)
-        (= t :bail) (do (utils/safe-println (str "Step " (:name step) " failed. Aborting...")) step-ret)))))
-
-
 (defn make-step-exec-f [step params]
   (fn [] ((:handler step) params)))
 
@@ -77,8 +68,6 @@
 (defn run-in-parallel [function params ^ThreadPoolExecutor pool]
   (let [tasks   (map (fn [p] #(apply function p)) params)
         results (map #(.get %) (.invokeAll pool tasks))]
-    ;(.shutdown pool)
-    ;(utils/locked-println results)
     results))
 
 
@@ -117,15 +106,6 @@
 
         (:skip) (do (utils/safe-println (str "Skip: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)))
                     no-err-ret)))))
-
-
-
-
-
-  ;(->> params
-  ;     (extract-and-check-params step)
-  ;     (make-step-exec-f step)
-  ;     (bail-or-skip step)))
 
 
 (defn get-entity [entity-type entity-name]
@@ -189,8 +169,6 @@
         (cond
           (vector? f-s) (recur r-s hosts (-> (run-step-group f-s params) (remove-no-err-ret) (first)))
           :default (run-step-group s params))))))
-          ;(vector? f-s) (recur r-s hosts (run-step-group-on-hosts f-s params))
-          ;:default (run-step-group-on-hosts s params))))))
 
 
 (defn run-classifier [classifier params]
@@ -277,15 +255,9 @@
 
 
 (defn shutdown-pools [params]
-  ;(doseq [pool (doall (map #(get params %) [:step-pool :recipe-pool]))])
   (doseq [pool [(:recipe-pool params) (:step-pool params)]]
     (shutdown-pool pool 10))
   (flush))
-
-  ;(utils/locked-println "terminated? " (.isTerminated (:recipe-pool params)))
-  ;(utils/locked-println "terminated? " (.isTerminated (:step-pool params)))
-  ;(utils/locked-println "shut? " (.isShutdown (:recipe-pool params)))
-  ;(utils/locked-println "shut? " (.isShutdown (:step-pool params))))
 
 
 (defn run [params]
