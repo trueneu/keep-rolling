@@ -1,7 +1,7 @@
 (ns keep-rolling-clj.core
   (:require [keep-rolling-clj.utils :as utils])
   (:import [Double])
-  (:import [java.util.concurrent Executors ThreadPoolExecutor]))
+  (:import [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
 
 
 (def default-step-params
@@ -25,7 +25,6 @@
 (def no-err-ret {:err nil :err-msg nil})
 
 
-
 (defn remove-no-err-ret [coll]
   (remove #(= % no-err-ret) coll))
 
@@ -46,7 +45,7 @@
     extracted-params))
 
 
-(defn loop-if [predicate delay retries retry-f f]
+(defn loop-if [predicate delay retries retry-f f]  ;; eto EBOK
   (loop [ret   (f)
          count 0]
     (cond
@@ -62,8 +61,8 @@
     (if (utils/no-err-ret? step-ret)
       step-ret
       (cond
-        (= t :skip) (do (utils/locked-println (str "Step " (:name step) " failed. Skipping...")) no-err-ret)
-        (= t :bail) (do (utils/locked-println (str "Step " (:name step) " failed. Aborting...")) step-ret)))))
+        (= t :skip) (do (utils/safe-println (str "Step " (:name step) " failed. Skipping...")) no-err-ret)
+        (= t :bail) (do (utils/safe-println (str "Step " (:name step) " failed. Aborting...")) step-ret)))))
 
 
 (defn make-step-exec-f [step params]
@@ -75,32 +74,58 @@
     (throw-exception-if empty? (str "Classifier " classifier " did not return anything when called with " params) classifier-res)))
 
 
-(defn println-code-and-msg
-  ([ret]
-   (utils/locked-println (str "Error code " (:err ret) ": " (:err-msg ret))))
-  ([preamble ret]
-   (print preamble)
-   (println-code-and-msg ret)))
-
-
 (defn run-in-parallel [function params ^ThreadPoolExecutor pool]
   (let [tasks   (map (fn [p] #(apply function p)) params)
         results (map #(.get %) (.invokeAll pool tasks))]
     ;(.shutdown pool)
-    (println results)
+    ;(utils/locked-println results)
     results))
 
 
+(def immediate-return (ref false))
+
+
+(defn step-failed-msg []
+  {:err 111 :err-msg "Another step already failed"})  ;; 111 is a good number, sure, but...
+
+
 (defn run-step [step params]
-  (utils/locked-print-debug 1 (str "Running step " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)))
-  (->> params
-       (extract-and-check-params step)
-       (make-step-exec-f step)
-       (loop-if (comp not utils/no-err-ret?)
-                (:delay step)
-                (:retries step)
-                #(println-code-and-msg %))
-       (bail-or-skip step)))
+  (let [{:keys [retries delay]} step
+        extracted-params (extract-and-check-params step params)
+        _                (utils/safe-print-debug 1 (str "Run: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) " with " extracted-params)) ; fixme form msg as a fn
+        exec-f           (make-step-exec-f step extracted-params)
+        step-ret         (reduce
+                           (fn [_ f]
+                             (if @immediate-return
+                               (reduced (step-failed-msg))
+                               (let [step-ret (f)]
+                                 (if (no-err-ret step-ret)
+                                   (reduced step-ret)
+                                   (do (utils/safe-println-code-and-msg (str "Retry: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) ", last error was: ") step-ret)
+                                       (Thread/sleep (* delay 1000))
+                                       step-ret)))))
+                           no-err-ret
+                           (repeat retries exec-f))
+        strategy (:on-failure step)]
+    (if (utils/no-err-ret? step-ret)
+      step-ret
+      (case strategy
+        (:bail) (do (utils/safe-println-code-and-msg (str "Abort: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) ", cause: ") step-ret)
+                    (dosync
+                      (ref-set immediate-return true))
+                    step-ret)
+
+        (:skip) (do (utils/safe-println (str "Skip: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)))
+                    no-err-ret)))))
+
+
+
+
+
+  ;(->> params
+  ;     (extract-and-check-params step)
+  ;     (make-step-exec-f step)
+  ;     (bail-or-skip step)))
 
 
 (defn get-entity [entity-type entity-name]
@@ -128,13 +153,13 @@
     (reduce (fn [_ step]
               (let [parallel     (:parallel-execution step)
                     run-step-ret (if parallel
-                                   ;; todo test when steps fail!
+                                   ;; todo test when steps fail!  -- doesn't work
                                    (-> (run-in-parallel run-step (map (fn [host] [step (assoc params :host host)]) (:hosts params)) (:step-pool params))
                                        (remove-no-err-ret)
                                        (first))
                                    (run-step step params-with-host))]
                 (when-not (utils/no-err-ret? run-step-ret)
-                  (println-code-and-msg "Last error: " run-step-ret)
+                  ;(println-code-and-msg "Last error: " run-step-ret)
                   (reduced run-step-ret))
                 run-step-ret))
             no-err-ret
@@ -162,7 +187,7 @@
       prev-ret
       (let [[f-s & r-s] s]
         (cond
-          (vector? f-s) (recur r-s hosts (run-step-group f-s params))
+          (vector? f-s) (recur r-s hosts (-> (run-step-group f-s params) (remove-no-err-ret) (first)))
           :default (run-step-group s params))))))
           ;(vector? f-s) (recur r-s hosts (run-step-group-on-hosts f-s params))
           ;:default (run-step-group-on-hosts s params))))))
@@ -239,15 +264,39 @@
     expanded-params))
 
 
+(defn shutdown-pool [^ExecutorService pool timeout]
+  (.shutdown pool)
+  (try
+    (when-not (.awaitTermination pool timeout TimeUnit/SECONDS)
+      (.shutdownNow pool)
+      (if (not (.awaitTermination pool timeout TimeUnit/SECONDS))
+        (utils/safe-println "Pool did not terminate")))
+    (catch InterruptedException ie
+      (.shutdownNow pool)
+      (.interrupt (Thread/currentThread)))))
+
+
 (defn shutdown-pools [params]
-  (.shutdown (:step-pool params))
-  (.shutdown (:recipe-pool params)))
+  ;(doseq [pool (doall (map #(get params %) [:step-pool :recipe-pool]))])
+  (doseq [pool [(:recipe-pool params) (:step-pool params)]]
+    (shutdown-pool pool 10))
+  (flush))
+
+  ;(utils/locked-println "terminated? " (.isTerminated (:recipe-pool params)))
+  ;(utils/locked-println "terminated? " (.isTerminated (:step-pool params)))
+  ;(utils/locked-println "shut? " (.isShutdown (:recipe-pool params)))
+  ;(utils/locked-println "shut? " (.isShutdown (:step-pool params))))
+
 
 (defn run [params]
-  (let [expanded-params (expand-params params)]
-    (utils/locked-print-debug 1 expanded-params)
-    (run-steps (:steps expanded-params) expanded-params)
-    (shutdown-pools expanded-params)))
+  (let [expanded-params (expand-params params)
+        _ (utils/safe-print-debug 1 expanded-params)
+        ret (run-steps (:steps expanded-params) expanded-params)]
+    (shutdown-pools expanded-params)
+    (if (utils/no-err-ret? ret)
+      (utils/safe-println "Finished successfully")
+      (utils/safe-println-code-and-msg "Failed, last error: " ret))))
+
 
 (run {:classifier :test-classifier1
       :cluster    "kafka"

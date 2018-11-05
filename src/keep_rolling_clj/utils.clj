@@ -1,6 +1,6 @@
 (ns keep-rolling-clj.utils
   (:require [clojure.pprint :as pprint])
-  (:import (java.io File)))
+  (:import (java.io File OutputStreamWriter)))
 
 
 (def debug 999)
@@ -9,29 +9,41 @@
 (def stdout-lock (Object.))
 
 
+(def out *out*)
+
+
 (defn locked [lock fn & more]
   (locking lock
     (apply fn more)))
 
 
-(defn locked-print [& more]
-  (apply locked stdout-lock print more))
+(defn safe-print [& more]
+  (apply locked stdout-lock
+          (fn [& m]
+            (.write out (str (clojure.string/join " " m)))
+            (.flush out))
+          more))
 
 
-(defn locked-println [& more]
-  (apply locked stdout-lock println more))
+(defn safe-println [& more]
+  (apply safe-print (conj (vec more) "\n")))
 
 
-(defn locked-print-debug [level & more]
+(defn safe-print-debug [level & more]
   (when (>= debug level)
-    (locked
-      stdout-lock
-      #(doseq [object %]
-        (cond
-          (= String (type object)) (println object)
-          :default (pprint/pprint object)))
-      more)))
+    (safe-print
+      (with-out-str
+        (doseq [object more]
+         (cond
+           (= String (type object)) (println object)
+           :default (pprint/pprint object)))))))
 
+
+(defn safe-println-code-and-msg
+  ([ret]
+   (safe-println-code-and-msg "" ret))
+  ([preamble ret]
+   (safe-println (str preamble "Error code " (:err ret) ": " (:err-msg ret)))))
 
 
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
@@ -108,7 +120,7 @@
 
 
 (defn err-ret? [ret]
-  ((comp not no-err-ret?) (:err ret)))
+  ((comp not no-err-ret?) ret))
 
 
 (defn equal-count? [coll & colls]

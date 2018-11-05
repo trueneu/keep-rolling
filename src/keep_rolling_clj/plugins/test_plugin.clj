@@ -6,12 +6,12 @@
    :action-type        :handler
    :handler            (fn [params]
                          (Thread/sleep 1000)
-                         {:err nil :err-msg nil})
+                         {:err 1 :err-msg nil})
    :required-params    [:message :host]
    :on-failure         :bail
    :retries            2
-   :delay              1})
-   ;:parallel-execution true})
+   :delay              1
+   :parallel-execution true})
 
 (def ^:kr step-data2
   {:type        :step
