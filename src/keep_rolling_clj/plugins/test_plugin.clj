@@ -6,7 +6,7 @@
    :action-type        :handler
    :handler            (fn [params]
                          (Thread/sleep 1000)
-                         {:err 1 :err-msg nil})
+                         {:err 0 :err-msg nil})
    :required-params    [:message :host]
    :on-failure         :bail
    :retries            2

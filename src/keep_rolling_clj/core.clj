@@ -99,7 +99,7 @@
                              (if @immediate-return
                                (reduced (step-failed-msg))
                                (let [step-ret (f)]
-                                 (if (no-err-ret step-ret)
+                                 (if (utils/no-err-ret? step-ret)
                                    (reduced step-ret)
                                    (do (utils/safe-println-code-and-msg (str "Retry: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) ", last error was: ") step-ret)
                                        (Thread/sleep (* delay 1000))
