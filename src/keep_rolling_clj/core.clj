@@ -46,17 +46,6 @@
     extracted-params))
 
 
-(defn loop-if [predicate delay retries retry-f f]           ;; eto EBOK
-  (loop [ret   (f)
-         count 0]
-    (cond
-      (not (predicate ret)) ret
-      (>= count retries) ret
-      :default (do (retry-f ret)
-                   (Thread/sleep (* 1000 delay))
-                   (recur (f) (inc count))))))
-
-
 (defn make-step-exec-f [step params]
   (fn [] ((:handler step) params)))
 
@@ -157,15 +146,6 @@
                 run-step-ret))
             no-err-ret
             steps)))
-
-
-(defn run-step-group-on-hosts [steps params]
-  (reduce (fn [_ host]
-            (let [run-step-group-ret (run-step-group-on-host steps host params)]
-              (when-not (utils/no-err-ret? run-step-group-ret)
-                (reduced run-step-group-ret))))
-          no-err-ret
-          (:hosts params)))
 
 
 (defn run-step-group [steps params]
