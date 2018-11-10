@@ -2,14 +2,23 @@
   (:require [clojure.pprint :as pprint])
   (:import (java.io File OutputStreamWriter)))
 
-
+(def no-err-ret {:err nil :err-msg nil})
 (def debug 999)
-
-
 (def stdout-lock (Object.))
-
-
 (def out *out*)
+(def ansi-esc (str (char 27) \[))
+(def color-map
+  {:black        30
+   :red          31
+   :green        32
+   :yellow       33
+   :blue         34
+   :magenta      35
+   :cyan         36
+   :white        37})
+(def stage-padding 8)
+(def step-padding 20)
+(def service-padding 32)
 
 
 (defn locked [lock fn & more]
@@ -39,11 +48,11 @@
            :default (pprint/pprint object)))))))
 
 
-(defn safe-println-code-and-msg
+(defn make-code-and-msg-string
   ([ret]
-   (safe-println-code-and-msg "" ret))
+   (make-code-and-msg-string "" ret))
   ([preamble ret]
-   (safe-println (str preamble "Error code " (:err ret) ": " (:err-msg ret)))))
+   (str preamble "Error code " (:err ret) ": " (:err-msg ret))))
 
 
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
@@ -123,5 +132,34 @@
   ((comp not no-err-ret?) ret))
 
 
+(defn remove-no-err-ret [coll]
+  (remove #(= % no-err-ret) coll))
+
+
 (defn equal-count? [coll & colls]
   (apply = (count coll) (map count colls)))
+
+
+(defn escape [n]
+  (let [n (if (sequential? n) (clojure.string/join ";" n) n)]
+      (str ansi-esc n "m")))
+
+
+(defn colorize [color s]
+  (str (escape (get color-map color)) s (escape (get color-map :black))))
+
+
+(defn pad-string [padding s]
+  (str s (apply str (repeat (- padding (count s)) " "))))
+
+
+(defn pad-stage [s]
+  (pad-string stage-padding s))
+
+
+(defn pad-step [s]
+  (pad-string step-padding s))
+
+
+(defn pad-service [s]
+  (pad-string service-padding s))

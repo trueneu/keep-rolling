@@ -1,7 +1,7 @@
 (ns keep-rolling-clj.core
   (:require [keep-rolling-clj.utils :as utils])
-  (:import [Double])
-  (:import [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
+  (:import [Double]
+           [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
 
 
 (def default-step-params
@@ -15,7 +15,7 @@
 (def default-global-params
   {:host-filter        ".*"
    :step-parallelism   10
-   :recipe-parallelism 1})                                  ;; TODO change this to 1
+   :recipe-parallelism 1})
 
 
 (defn gen-entity-map [entities-coll]
@@ -23,11 +23,10 @@
 
 
 (def entity-map (gen-entity-map (utils/get-all-plugins)))
-(def no-err-ret {:err nil :err-msg nil})
 
 
-(defn remove-no-err-ret [coll]
-  (remove #(= % no-err-ret) coll))
+(def step-already-failed-error-code 126)
+
 
 (defn extract-params [entity params]
   (select-keys params (:required-params entity)))
@@ -66,37 +65,51 @@
 
 
 (defn step-failed-msg []
-  {:err 111 :err-msg "Another step already failed"})        ;; 111 is a good number, sure, but...
+  {:err step-already-failed-error-code :err-msg "Another step already failed"})
+
+
+(defn make-execution-description-string [step host]
+  (str (utils/pad-step (str (:name step)))
+       (utils/pad-service (if (:service step) (str "service " (str (:service step)) "")))
+       " @ " host))
 
 
 (defn run-step [step params]
   (let [{:keys [retries delay]} step
-        extracted-params (extract-and-check-params step params)
-        _                (utils/safe-print-debug 1 (str "Run: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) " with " extracted-params)) ; fixme form msg as a fn
-        exec-f           (make-step-exec-f step extracted-params)
-        step-ret         (reduce
-                           (fn [_ f]
-                             (if @immediate-return
-                               (reduced (step-failed-msg))
-                               (let [step-ret (f)]
-                                 (if (utils/no-err-ret? step-ret)
-                                   (reduced step-ret)
-                                   (do (utils/safe-println-code-and-msg (str "Retry: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) ", last error was: ") step-ret)
-                                       (Thread/sleep (* delay 1000))
-                                       step-ret)))))
-                           no-err-ret
-                           (repeat retries exec-f))
-        strategy         (:on-failure step)]
+        extracted-params             (extract-and-check-params step params)
+        execution-description-string (make-execution-description-string step (:host params))
+        _                            (utils/safe-println (utils/colorize :green (str (utils/pad-stage "Run:") execution-description-string " with " extracted-params)))
+        exec-f                       (make-step-exec-f step extracted-params)
+        step-ret                     (reduce
+                                       (fn [_ f]
+                                         (if @immediate-return
+                                           (reduced (step-failed-msg))
+                                           (let [step-ret (f)]
+                                             (if (utils/no-err-ret? step-ret)
+                                               (reduced step-ret)
+                                               (do (utils/safe-println (utils/colorize
+                                                                         :yellow
+                                                                         (utils/make-code-and-msg-string (str (utils/pad-stage "Retry:") execution-description-string ", last error was: ") step-ret)))
+                                                   (Thread/sleep (* delay 1000))
+                                                   step-ret)))))
+                                       utils/no-err-ret
+                                       (repeat retries exec-f))
+        strategy                     (:on-failure step)]
     (if (utils/no-err-ret? step-ret)
       step-ret
       (case strategy
-        (:bail) (do (utils/safe-println-code-and-msg (str "Abort: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params) ", cause: ") step-ret)
+        (:bail) (do (utils/safe-println (utils/colorize
+                                          :red
+                                          (utils/make-code-and-msg-string (str (utils/pad-stage "Abort:") execution-description-string ", cause: ") step-ret)))
                     (dosync
                       (ref-set immediate-return true))
                     step-ret)
 
-        (:skip) (do (utils/safe-println-code-and-msg (str "Skip: " (:name step) (if (:service step) (str ", service " (:service step)) "") " on host " (:host params)) step-ret)
-                    no-err-ret)))))
+        (:skip) (do (utils/safe-println
+                      (utils/colorize
+                        :blue
+                        (utils/make-code-and-msg-string (str (utils/pad-stage "Skip:") execution-description-string ", cause: ") step-ret)))
+                    utils/no-err-ret)))))
 
 
 (defn get-entity [entity-type entity-name]
@@ -136,15 +149,15 @@
                     run-step-ret (if execute?
                                    (if parallel
                                      (-> (run-in-parallel run-step (map (fn [host] [step (assoc params :host host)]) (:hosts params)) (:step-pool params))
-                                         (remove-no-err-ret)
+                                         (utils/remove-no-err-ret)
                                          (first))
                                      (run-step step params-with-host))
-                                   no-err-ret)]
+                                   utils/no-err-ret)]
                 (when-not (utils/no-err-ret? run-step-ret)
                   ;(println-code-and-msg "Last error: " run-step-ret)
                   (reduced run-step-ret))
                 run-step-ret))
-            no-err-ret
+            utils/no-err-ret
             steps)))
 
 
@@ -155,12 +168,12 @@
 (defn run-steps [step-groups params]
   (loop [s        step-groups
          hosts    (:hosts params)
-         prev-ret no-err-ret]
+         prev-ret utils/no-err-ret]
     (if (or (empty? hosts) (empty? s) (utils/err-ret? prev-ret))
       prev-ret
       (let [[f-s & r-s] s]
         (cond
-          (vector? f-s) (recur r-s hosts (-> (run-step-group f-s params) (remove-no-err-ret) (first)))
+          (vector? f-s) (recur r-s hosts (-> (run-step-group f-s params) (utils/remove-no-err-ret) (first)))
           :default (run-step-group s params))))))
 
 
@@ -185,7 +198,7 @@
   (let [action-type (:action-type step)]
     (-> step
         (assoc :action-type :handler)
-        (assoc :handler (get service action-type (fn [& _] no-err-ret)))
+        (assoc :handler (get service action-type (fn [& _] utils/no-err-ret)))
         (assoc :service (:name service))
         (assoc :required-params (:required-params service)))))
 
@@ -257,12 +270,12 @@
 (defn run [params]
   (dosync (ref-set immediate-return false))
   (let [expanded-params (expand-params params)
-        _               (utils/safe-print-debug 1 expanded-params)
         ret             (run-steps (:steps expanded-params) expanded-params)]
     (shutdown-pools expanded-params)
-    (if (utils/no-err-ret? ret)
+    (if (and (utils/no-err-ret? ret) (not @immediate-return))
       (utils/safe-println "Finished successfully")
-      (utils/safe-println-code-and-msg "Failed, last error: " ret))))
+      (utils/safe-println (utils/colorize :red "Failed")))))
+
 
 
 (run {:classifier :test-classifier1

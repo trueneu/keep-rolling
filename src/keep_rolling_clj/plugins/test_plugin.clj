@@ -31,6 +31,21 @@
    :retries     2
    :delay       1})
 
+;(def ^:kr recipe-data1
+;  {:type    :recipe
+;   :name    :test-recipe1
+;   :steps   [:test-step2 :test-step3]
+;   :handler (fn [params]
+;              {:recipe-msg "HELLO SUKA"})})
+;
+;(def ^:kr classifier-data1
+;  {:type            :classifier
+;   :name            :test-classifier1
+;   :required-params [:cluster]
+;   :handler         (fn [params]
+;                      (cond
+;                        (= (:cluster params) "kafka") ["host2"]))})
+
 (def ^:kr recipe-data1
   {:type    :recipe
    :name    :test-recipe1
