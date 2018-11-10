@@ -225,7 +225,7 @@
         host-filter            (:host-filter params-with-defaults)
         classifier             (get-classifier classifier-name)
         recipe                 (get-recipe recipe-name)
-        params-recipe-addition ((:handler recipe) params-with-defaults)
+        params-recipe-addition ((get recipe :handler (fn [& _] {})) params-with-defaults)
         params-recipe-enriched (merge params-with-defaults params-recipe-addition)
         params-with-pools      (-> params-recipe-enriched
                                    (assoc :step-pool (Executors/newFixedThreadPool (:step-parallelism params-with-defaults)))
