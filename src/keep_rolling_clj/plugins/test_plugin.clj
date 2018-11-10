@@ -12,7 +12,8 @@
    :on-failure         :bail
    :retries            2
    :delay              1
-   :parallel-execution true})
+   :parallel-execution false
+   :only-once          true})
 
 (def ^:kr step-data2
   {:type        :step

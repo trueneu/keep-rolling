@@ -8,7 +8,8 @@
   {:on-failure         :bail
    :delay              5
    :retries            Double/POSITIVE_INFINITY
-   :parallel-execution false})
+   :parallel-execution false
+   :only-once          false})
 
 
 (def default-global-params
@@ -45,7 +46,7 @@
     extracted-params))
 
 
-(defn loop-if [predicate delay retries retry-f f]  ;; eto EBOK
+(defn loop-if [predicate delay retries retry-f f]           ;; eto EBOK
   (loop [ret   (f)
          count 0]
     (cond
@@ -72,10 +73,11 @@
 
 
 (def immediate-return (ref false))
+(def only-once-executed (ref {}))
 
 
 (defn step-failed-msg []
-  {:err 111 :err-msg "Another step already failed"})  ;; 111 is a good number, sure, but...
+  {:err 111 :err-msg "Another step already failed"})        ;; 111 is a good number, sure, but...
 
 
 (defn run-step [step params]
@@ -95,7 +97,7 @@
                                        step-ret)))))
                            no-err-ret
                            (repeat retries exec-f))
-        strategy (:on-failure step)]
+        strategy         (:on-failure step)]
     (if (utils/no-err-ret? step-ret)
       step-ret
       (case strategy
@@ -132,12 +134,23 @@
   (let [params-with-host (assoc params :host host)]
     (reduce (fn [_ step]
               (let [parallel     (:parallel-execution step)
-                    run-step-ret (if parallel
-                                   ;; todo test when steps fail!  -- doesn't work
-                                   (-> (run-in-parallel run-step (map (fn [host] [step (assoc params :host host)]) (:hosts params)) (:step-pool params))
-                                       (remove-no-err-ret)
-                                       (first))
-                                   (run-step step params-with-host))]
+                    execute?     (if-not (:only-once step)
+                                   true
+                                   (dosync
+                                     (let [was-executed? (get @only-once-executed step)]
+                                       (if was-executed?
+                                         false
+                                         (do
+                                           (alter only-once-executed assoc step true)
+                                           true)))))
+
+                    run-step-ret (if execute?
+                                   (if parallel
+                                     (-> (run-in-parallel run-step (map (fn [host] [step (assoc params :host host)]) (:hosts params)) (:step-pool params))
+                                         (remove-no-err-ret)
+                                         (first))
+                                     (run-step step params-with-host))
+                                   no-err-ret)]
                 (when-not (utils/no-err-ret? run-step-ret)
                   ;(println-code-and-msg "Last error: " run-step-ret)
                   (reduced run-step-ret))
@@ -264,8 +277,8 @@
 (defn run [params]
   (dosync (ref-set immediate-return false))
   (let [expanded-params (expand-params params)
-        _ (utils/safe-print-debug 1 expanded-params)
-        ret (run-steps (:steps expanded-params) expanded-params)]
+        _               (utils/safe-print-debug 1 expanded-params)
+        ret             (run-steps (:steps expanded-params) expanded-params)]
     (shutdown-pools expanded-params)
     (if (utils/no-err-ret? ret)
       (utils/safe-println "Finished successfully")
