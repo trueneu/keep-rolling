@@ -1,13 +1,12 @@
 (ns keep-rolling-clj.core
   (:require [keep-rolling-clj.utils :as utils])
-  (:import [Double]
-           [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
+  (:import [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
 
 
 (def default-step-params
   {:on-failure         :bail
    :delay              5
-   :retries            Double/POSITIVE_INFINITY
+   :retries            ##Inf
    :parallel-execution false
    :only-once          false})
 
