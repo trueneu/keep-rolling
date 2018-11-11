@@ -93,7 +93,9 @@
                                                    (Thread/sleep (* delay 1000))
                                                    step-ret)))))
                                        utils/no-err-ret
-                                       (repeat retries exec-f))
+                                       (if (= ##Inf retries)
+                                         (repeat exec-f)
+                                         (repeat retries exec-f)))
         strategy                     (:on-failure step)]
     (if (utils/no-err-ret? step-ret)
       step-ret

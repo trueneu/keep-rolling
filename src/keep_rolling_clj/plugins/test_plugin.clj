@@ -10,7 +10,6 @@
                          {:err 0 :err-msg nil})
    :required-params    [:message :host]
    :on-failure         :bail
-   :retries            2
    :delay              1
    :parallel-execution false
    :only-once          true})
