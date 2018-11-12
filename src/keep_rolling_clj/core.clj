@@ -8,7 +8,12 @@
    :delay              5
    :retries            ##Inf
    :parallel-execution false
-   :only-once          false})
+   :only-once          false
+   :service-priority-sort :ascending})
+
+
+(def default-service-params
+  {:priority 100})
 
 
 (def default-global-params
@@ -204,11 +209,12 @@
         (assoc :required-params (:required-params service)))))
 
 
-(defn expand-service-step [step services]
+(defn expand-service-step [step services-asc services-desc]
   (let [action-type (:action-type step)]
     (if (= action-type :handler)
       [step]
-      (map (partial service-to-step step) services))))
+      (map (partial service-to-step step)
+           (if (= (:service-priority-sort step) :ascending) services-asc services-desc)))))
 
 
 (defn check-steps-nesting [steps]
@@ -237,14 +243,18 @@
                                    (assoc :hosts filtered-hosts)
                                    (assoc :all-hosts hosts))
 
-        matching-services      (get-matching-services (services-vec) params-with-hosts)
+        all-services           (map merge (repeat default-service-params) (services-vec))
+
+        matching-services      (get-matching-services all-services params-with-hosts)
+        services-asc           (sort-by :priority matching-services)
+        services-desc          (sort-by #(Math/negateExact ^long (:priority %)) matching-services)
 
         steps                  (->> (:steps recipe)
                                     (check-steps-nesting)
                                     (utils/deep-map-scalar get-step)
                                     (utils/deep-map-scalar #(merge default-step-params %)))
 
-        expanded-steps         (utils/deep-map-coll #(expand-service-step % matching-services) steps)
+        expanded-steps         (utils/deep-map-coll #(expand-service-step % services-asc services-desc) steps)
         expanded-params        (assoc params-with-hosts :steps expanded-steps)]
 
     expanded-params))
@@ -279,7 +289,7 @@
 
 
 
-(run {:classifier :test-classifier1
-      :cluster    "kafka"
-      :recipe     :test-recipe1
-      :message    "hui"})
+;(run {:classifier :test-classifier1
+;      :cluster    "kafka"
+;      :recipe     :test-recipe1
+;      :message    "hui"})

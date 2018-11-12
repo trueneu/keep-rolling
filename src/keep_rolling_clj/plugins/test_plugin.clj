@@ -28,7 +28,8 @@
    :action-type :stop
    :on-failure  :skip
    :retries     2
-   :delay       1})
+   :delay       1
+   :service-priority-sort :descending})
 
 ;(def ^:kr recipe-data1
 ;  {:type    :recipe
@@ -79,6 +80,7 @@
   {:type            :service
    :name            :test-service2
    :required-params [:cluster]
+   :priority        50
    :matcher         (fn [params]
                       (= (:cluster params) "kafka"))
    :start           (fn [params]
