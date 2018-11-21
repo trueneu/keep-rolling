@@ -1,14 +1,15 @@
 (ns keep-rolling-clj.core
-  (:require [keep-rolling-clj.utils :as utils])
+  (:require [keep-rolling-clj.utils :as utils]
+            [keep-rolling-clj.plugins :as plugins])
   (:import [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
 
 
 (def default-step-params
-  {:on-failure         :bail
-   :delay              5
-   :retries            ##Inf
-   :parallel-execution false
-   :only-once          false
+  {:on-failure            :bail
+   :delay                 5
+   :retries               ##Inf
+   :parallel-execution    false
+   :only-once             false
    :service-priority-sort :ascending})
 
 
@@ -17,16 +18,9 @@
 
 
 (def default-global-params
-  {:host-filter        ".*"
-   :step-parallelism   10
-   :recipe-parallelism 1})
-
-
-(defn gen-entity-map [entities-coll]
-  (reduce (fn [acc val] (assoc-in acc [(:type val) (:name val)] val)) {} entities-coll))
-
-
-(def entity-map (gen-entity-map (utils/get-all-plugins)))
+  {:host-filter    ".*"
+   :step-threads   10
+   :recipe-threads 1})
 
 
 (def step-already-failed-error-code 126)
@@ -45,7 +39,7 @@
 (defn extract-and-check-params [entity params]
   (let [extracted-params (extract-params entity params)
         required-params  (:required-params entity)]
-    (throw-exception-if (comp not utils/equal-count?) (str "Invalid parameters passed to " (:name entity) ": " params ", wanted: " required-params) required-params extracted-params)
+    (throw-exception-if (comp not utils/equal-count?) (str "Invalid parameters passed to " (:name entity) ". Wanted: " required-params) required-params extracted-params)
     extracted-params))
 
 
@@ -118,26 +112,6 @@
                     utils/no-err-ret)))))
 
 
-(defn get-entity [entity-type entity-name]
-  (get-in entity-map [entity-type entity-name]))
-
-
-(defn get-step [step-name]
-  (get-entity :step step-name))
-
-
-(defn get-classifier [classifier-name]
-  (get-entity :classifier classifier-name))
-
-
-(defn get-service [service-name]
-  (get-entity :service service-name))
-
-
-(defn get-recipe [recipe-name]
-  (get-entity :recipe recipe-name))
-
-
 (defn run-step-group-on-host [steps host params]
   (let [params-with-host (assoc params :host host)]
     (reduce (fn [_ step]
@@ -190,10 +164,10 @@
 
 
 (defn services-vec []
-  (->> entity-map
+  (->> plugins/entity-map
        (:service)
        (keys)
-       (mapv get-service)))
+       (mapv plugins/get-service)))
 
 
 (defn get-matching-services [services params]
@@ -230,13 +204,13 @@
   (let [{classifier-name :classifier recipe-name :recipe} params
         params-with-defaults   (merge default-global-params params)
         host-filter            (:host-filter params-with-defaults)
-        classifier             (get-classifier classifier-name)
-        recipe                 (get-recipe recipe-name)
+        classifier             (plugins/get-classifier classifier-name)
+        recipe                 (plugins/get-recipe recipe-name)
         params-recipe-addition ((get recipe :handler (fn [& _] {})) params-with-defaults)
         params-recipe-enriched (merge params-with-defaults params-recipe-addition)
         params-with-pools      (-> params-recipe-enriched
-                                   (assoc :step-pool (Executors/newFixedThreadPool (:step-parallelism params-with-defaults)))
-                                   (assoc :recipe-pool (Executors/newFixedThreadPool (:recipe-parallelism params-with-defaults))))
+                                   (assoc :step-pool (Executors/newFixedThreadPool (:step-threads params-with-defaults)))
+                                   (assoc :recipe-pool (Executors/newFixedThreadPool (:recipe-threads params-with-defaults))))
         hosts                  (run-classifier classifier params-recipe-enriched)
         filtered-hosts         (filter #(re-find (re-pattern host-filter) %) hosts)
         params-with-hosts      (-> params-with-pools
@@ -251,7 +225,7 @@
 
         steps                  (->> (:steps recipe)
                                     (check-steps-nesting)
-                                    (utils/deep-map-scalar get-step)
+                                    (utils/deep-map-scalar plugins/get-step)
                                     (utils/deep-map-scalar #(merge default-step-params %)))
 
         expanded-steps         (utils/deep-map-coll #(expand-service-step % services-asc services-desc) steps)
@@ -278,18 +252,38 @@
   (flush))
 
 
+(defn preflight-checks [params]
+  (let [{:keys [classifier recipe]} params]
+    (reduce
+      (fn [acc [entity-type entity-name]]
+        (if-not (plugins/exists? entity-type entity-name)
+          (reduced [entity-type entity-name])))
+      nil
+      (concat [[:classifier classifier] [:recipe recipe]]
+              (map (fn [step-name] [:step step-name]) (flatten (:steps (plugins/get-recipe recipe))))))))
+
+
+(comment
+  (flatten (utils/deep-map-scalar #(plugins/exists? :step %) [[:test-step1] [:test-step2 :test-step3 [:test-step4]]])))
+
+
 (defn run [params]
   (dosync (ref-set immediate-return false))
-  (let [expanded-params (expand-params params)
-        ret             (run-steps (:steps expanded-params) expanded-params)]
-    (shutdown-pools expanded-params)
-    (if (and (utils/no-err-ret? ret) (not @immediate-return))
-      (utils/safe-println "Finished successfully")
-      (utils/safe-println (utils/colorize :red "Failed")))))
+  (dosync (ref-set only-once-executed {}))
+  (if-let [[entity-type entity-name] (preflight-checks params)]
+    (utils/safe-println (utils/colorize :red (str "Failed preflight checks. Entity " entity-name " of type " entity-type " could not be found")))
+    (let [expanded-params (expand-params params)
+          ret             (run-steps (:steps expanded-params) expanded-params)]
+      (shutdown-pools expanded-params)
+      (if (and (utils/no-err-ret? ret) (not @immediate-return))
+        (utils/safe-println "Finished successfully")
+        (utils/safe-println (utils/colorize :red "Failed"))))))
 
 
 
-;(run {:classifier :test-classifier1
-;      :cluster    "kafka"
-;      :recipe     :test-recipe1
-;      :message    "hui"})
+(comment
+  (run {:classifier :test-classifier1
+        :cluster    "kafka"
+        :recipe     :test-recipe1
+        :message    "bbbbb"}))
+

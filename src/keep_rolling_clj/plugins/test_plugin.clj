@@ -7,12 +7,14 @@
    :action-type        :handler
    :handler            (fn [params]
                          (Thread/sleep 1000)
+                         (utils/safe-println "blah")
                          {:err 0 :err-msg nil})
    :required-params    [:message :host]
    :on-failure         :bail
    :delay              1
    :parallel-execution false
-   :only-once          true})
+   :only-once          true
+   :doc                "Prints a message"})
 
 (def ^:kr step-data2
   {:type        :step
@@ -71,7 +73,8 @@
                       (utils/safe-println "Service1 started")
                       (if (= (:host params) "host1")
                         {:err nil :err-msg nil}
-                        {:err 100 :err-msg "because fuck off"}))
+                        {:err nil :err-msg nil}))
+                        ;{:err 100 :err-msg "because fuck off"}))
    :stop            (fn [params]
                       (utils/safe-println "Service1 stopped")
                       {:err 0 :err-msg "couldn't stop service"})})

@@ -1,6 +1,6 @@
 (ns keep-rolling-clj.utils
   (:require [clojure.pprint :as pprint])
-  (:import (java.io File OutputStreamWriter)))
+  (:import (java.io OutputStreamWriter)))
 
 (def no-err-ret {:err nil :err-msg nil})
 (def debug 999)
@@ -53,28 +53,6 @@
    (make-code-and-msg-string "" ret))
   ([preamble ret]
    (str preamble "Error code " (:err ret) ": " (:err-msg ret))))
-
-
-(def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
-
-
-(defn load-plugins []
-  (let [all-files (file-seq (File. ^String plugins-path))
-        without-dirs (remove #(.isDirectory ^File %) all-files)
-        only-clj (filter #(.endsWith (.getName %) ".clj") without-dirs)]
-    (doseq [plugin only-clj]
-      (load-file (.getPath plugin)))))
-
-
-(load-plugins)
-
-
-(defn get-all-plugins []
-  (->> (all-ns)
-   (mapcat ns-publics)
-   (map second)
-   (filter #(-> % meta :kr))
-   (map deref)))
 
 
 (defn deep-map
