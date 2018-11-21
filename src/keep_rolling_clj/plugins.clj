@@ -1,9 +1,11 @@
 (ns keep-rolling-clj.plugins
-  (:require [keep-rolling-clj.utils :as utils])
+  (:require [keep-rolling-clj.utils :as utils]
+            [clojure.string :as string])
   (:import (java.io File)))
 
 
 (def plugins-path "/Users/pgurkov/git_tree/keep-rolling-clj/src/keep_rolling_clj/plugins")
+(def internal-params #{:host :all-hosts :cluster :step-threads :recipe-threads :recipe :host-filter :verbosity})
 
 
 (defn load-plugins []
@@ -12,6 +14,9 @@
         only-clj (filter #(.endsWith (.getName %) ".clj") without-dirs)]
     (doseq [plugin only-clj]
       (load-file (.getPath plugin)))))
+
+
+(load-plugins)  ;; purely for side effects :)
 
 
 (defn get-all-plugins []
@@ -51,3 +56,25 @@
 (defn get-recipe [recipe-name]
   (get-entity :recipe recipe-name))
 
+
+(defn get-plugins-params-and-docs []
+  (->>
+    (get-all-plugins)
+    (map (juxt :name
+               #(remove internal-params (:required-params %))
+               :doc))
+    (sort-by first)))
+
+
+(defn plugins-params-and-docs-msg [plugins-params]
+  (string/join
+    (reduce (fn [acc val]
+              (let [[entity-name entity-params entity-doc] val]
+                (if (empty? entity-params)
+                  acc
+                  (-> acc
+                      (conj (name entity-name) ":\n  ")
+                      (conj "Params: " (string/join ", " (map name entity-params)))
+                      (conj "\n  " entity-doc "\n")))))
+            []
+            plugins-params)))

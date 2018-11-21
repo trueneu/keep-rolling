@@ -1,6 +1,8 @@
 (ns keep-rolling-clj.core
   (:require [keep-rolling-clj.utils :as utils]
-            [keep-rolling-clj.plugins :as plugins])
+            [keep-rolling-clj.plugins :as plugins]
+            [clojure.set]
+            [clojure.string :as string])
   (:import [java.util.concurrent Executors ThreadPoolExecutor ExecutorService TimeUnit]))
 
 
@@ -163,6 +165,12 @@
        (classify classifier)))
 
 
+(defn run-recipe [recipe params]
+  (->> params
+       (extract-and-check-params recipe)
+       ((get recipe :handler (fn [& _] {})))))
+
+
 (defn services-vec []
   (->> plugins/entity-map
        (:service)
@@ -206,7 +214,7 @@
         host-filter            (:host-filter params-with-defaults)
         classifier             (plugins/get-classifier classifier-name)
         recipe                 (plugins/get-recipe recipe-name)
-        params-recipe-addition ((get recipe :handler (fn [& _] {})) params-with-defaults)
+        params-recipe-addition (run-recipe recipe params-with-defaults)
         params-recipe-enriched (merge params-with-defaults params-recipe-addition)
         params-with-pools      (-> params-recipe-enriched
                                    (assoc :step-pool (Executors/newFixedThreadPool (:step-threads params-with-defaults)))
@@ -255,7 +263,7 @@
 (defn preflight-checks [params]
   (let [{:keys [classifier recipe]} params]
     (reduce
-      (fn [acc [entity-type entity-name]]
+      (fn [_ [entity-type entity-name]]
         (if-not (plugins/exists? entity-type entity-name)
           (reduced [entity-type entity-name])))
       nil
@@ -267,17 +275,34 @@
   (flatten (utils/deep-map-scalar #(plugins/exists? :step %) [[:test-step1] [:test-step2 :test-step3 [:test-step4]]])))
 
 
+(defn validate-required-params [params]
+  (let [params-keys (set (keys params))]
+    (reduce
+      (fn [_ step]
+        (let [req (set (remove plugins/internal-params (:required-params step)))]
+          (when-not (empty? (clojure.set/difference req params-keys))
+            (reduced step))))
+      nil
+      (flatten (:steps params)))))
+
+
+(comment
+  (validate-required-params {:steps {:required-params [:blah]} :blh "blah"}))
+
+
 (defn run [params]
   (dosync (ref-set immediate-return false))
   (dosync (ref-set only-once-executed {}))
   (if-let [[entity-type entity-name] (preflight-checks params)]
     (utils/safe-println (utils/colorize :red (str "Failed preflight checks. Entity " entity-name " of type " entity-type " could not be found")))
-    (let [expanded-params (expand-params params)
-          ret             (run-steps (:steps expanded-params) expanded-params)]
-      (shutdown-pools expanded-params)
-      (if (and (utils/no-err-ret? ret) (not @immediate-return))
-        (utils/safe-println "Finished successfully")
-        (utils/safe-println (utils/colorize :red "Failed"))))))
+    (let [expanded-params (expand-params params)]
+      (if-let [step (validate-required-params expanded-params)]
+        (utils/safe-println (utils/colorize :red (str "Failed preflight checks. Step " (:name step) " is not supplied with all user-defined params (" (string/join "," (remove plugins/internal-params (:required-params step))) ")")))
+        (let [ret (run-steps (:steps expanded-params) expanded-params)]
+          (shutdown-pools expanded-params)
+          (if (and (utils/no-err-ret? ret) (not @immediate-return))
+            (utils/safe-println "Finished successfully")
+            (utils/safe-println (utils/colorize :red "Failed"))))))))
 
 
 

@@ -53,7 +53,7 @@
    :name    :test-recipe1
    :steps   [[:test-step1] [:test-step2 :test-step3]]
    :handler (fn [params]
-              {:recipe-msg "HELLO SUKA"})})
+              nil)})
 
 (def ^:kr classifier-data1
   {:type            :classifier

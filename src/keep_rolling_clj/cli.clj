@@ -49,32 +49,6 @@
        (string/join \newline errors)))
 
 
-(def internal-params #{:host :all-hosts :cluster :step-threads :recipe-threads :recipe :host-filter :verbosity})
-
-
-(defn get-plugins-params []
-  (plugins/load-plugins)  ;; purely for side effects :)
-  (->>
-    (plugins/get-all-plugins)
-    (map (juxt :name
-               #(remove internal-params (:required-params %))
-               :doc))
-    (sort-by first)))
-
-
-(defn plugins-params-msg [plugins-params]
-  (string/join
-    (reduce (fn [acc val]
-              (let [[entity-name entity-params entity-doc] val]
-                (if (empty? entity-params)
-                  acc
-                  (-> acc
-                      (conj (name entity-name) ":\n  ")
-                      (conj "Params: " (string/join ", " (map name entity-params)))
-                      (conj "\n  " entity-doc "\n")))))
-            []
-            plugins-params)))
-
 (comment
   (def plugins-params (get-plugins-params))
   plugins-params
@@ -89,7 +63,7 @@
 (defn validate-args
   [args]
   (let [{:keys [options errors summary]} (cli/parse-opts args cli-options)
-        plugins-params-summary (plugins-params-msg (get-plugins-params))
+        plugins-params-summary (plugins/plugins-params-and-docs-msg (plugins/get-plugins-params-and-docs))
         usage-msg (usage summary plugins-params-summary)]
     (cond
       (:help options) {:exit-message usage-msg :ok? true}
