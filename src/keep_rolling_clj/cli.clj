@@ -23,10 +23,10 @@
    [nil "--step-threads num-threads" "Number of threads for step-level parallelism"
     :default 10
     :parse-fn #(Integer/parseInt %)]
-   ["-v" nil "Verbosity level; may be specified multiple times"
-    :id :verbosity
-    :default 0
-    :update-fn inc]
+   ;["-v" nil "Verbosity level; may be specified multiple times"
+   ; :id :verbosity
+   ; :default 0
+   ; :update-fn inc]
    ["-h" "--help"]])
 
 
@@ -88,9 +88,9 @@
             kr-params (-> options
                           (merge (walk/keywordize-keys param))
                           (dissoc :param))]
-        ;kr-params))))
         (core/run kr-params)))))
 
 
 (comment
-  (apply -main (string/split "-r test-recipe1 -c kafka -k test-classifier1 -p message=hi" #"\s")))
+  (apply -main (string/split "-r test-recipe1 -c kafka -k test-classifier1 -p message=hi" #"\s"))
+  (apply -main (string/split "-h" #"\s")))
